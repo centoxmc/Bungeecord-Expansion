@@ -25,12 +25,13 @@ public final class BungeeExpansion extends PlaceholderExpansion implements Plugi
     private static final String MESSAGE_CHANNEL = "BungeeCord";
     private static final String SERVERS_CHANNEL = "GetServers";
     private static final String PLAYERS_CHANNEL = "PlayerCount";
+    private static final String ADDRESS_CHANNEL = "ServerIP";
     private static final String CONFIG_INTERVAL = "check_interval";
 
     private static final Splitter SPLITTER = Splitter.on(",").trimResults();
 
 
-    private final Map<String, Integer>        counts = new HashMap<>();
+    private final Map<String, BungeeServer>   servers = new HashMap<>();
     private final AtomicReference<BukkitTask> cached = new AtomicReference<>();
 
 
@@ -57,31 +58,42 @@ public final class BungeeExpansion extends PlaceholderExpansion implements Plugi
 
     @Override
     public String onRequest(final OfflinePlayer player, String identifier) {
-        final int value;
-
-        switch (identifier.toLowerCase()) {
-            case "all":
-            case "total":
-                value = counts.values().stream().mapToInt(Integer::intValue).sum();
-                break;
+        String[] arguments = identifier.split("_");
+        if(arguments.length <= 1)
+            return null;
+        switch (arguments[0]){
+            case "status":
+                return String.valueOf(getServerStatus(arguments[1]));
+            case "players":
+                return String.valueOf(getPlayersOnline(arguments[1]));
             default:
-                value = counts.getOrDefault(identifier.toLowerCase(), 0);
-                break;
+                return null;
         }
-
-        return String.valueOf(value);
     }
+
+    public int getPlayersOnline(String server){
+        if(server.equalsIgnoreCase("total"))
+            return servers.values().stream().mapToInt(BungeeServer::getPlayers).sum();
+        return servers.containsKey(server.toLowerCase()) ? servers.get(server.toLowerCase()).getPlayers() : 0;
+    }
+
+    public boolean getServerStatus(String server){
+        return servers.containsKey(server.toLowerCase()) && servers.get(server.toLowerCase()).isOnline();
+    }
+
 
     @Override
     public void start() {
         final BukkitTask task = Bukkit.getScheduler().runTaskTimer(getPlaceholderAPI(), () -> {
 
-            if (counts.isEmpty()) {
-                sendServersChannelMessage();
-            }
+            if (servers.isEmpty()) sendServersChannelMessage();
             else {
-                counts.keySet().forEach(this::sendPlayersChannelMessage);
+                servers.forEach((key, value) -> {
+                    sendPlayersChannelMessage(key);
+                    value.checkStatus();
+                });
             }
+
 
         }, 20L * 2L, 20L * getLong(CONFIG_INTERVAL, 30));
 
@@ -103,7 +115,7 @@ public final class BungeeExpansion extends PlaceholderExpansion implements Plugi
         }
 
         prev.cancel();
-        counts.clear();
+        servers.clear();
 
         Bukkit.getMessenger().unregisterOutgoingPluginChannel(getPlaceholderAPI(), MESSAGE_CHANNEL);
         Bukkit.getMessenger().unregisterIncomingPluginChannel(getPlaceholderAPI(), MESSAGE_CHANNEL, this);
@@ -120,10 +132,22 @@ public final class BungeeExpansion extends PlaceholderExpansion implements Plugi
         final ByteArrayDataInput in = ByteStreams.newDataInput(message);
         switch (in.readUTF()) {
             case PLAYERS_CHANNEL:
-                counts.put(in.readUTF(), in.readInt());
+                BungeeServer pc_server = servers.get(in.readUTF());
+                if(pc_server != null)
+                    pc_server.setPlayers(in.readInt());
                 break;
             case SERVERS_CHANNEL:
-                SPLITTER.split(in.readUTF()).forEach(serverName -> counts.putIfAbsent(serverName, 0));
+                SPLITTER.split(in.readUTF()).forEach(serverName -> {
+                    servers.putIfAbsent(serverName.toLowerCase(), new BungeeServer(serverName));
+                    sendAddressChannelMessage(serverName);
+                });
+                break;
+            case ADDRESS_CHANNEL:
+                BungeeServer ac_server = servers.get(in.readUTF());
+                if(ac_server != null){
+                    ac_server.setIp(in.readUTF());
+                    ac_server.setPort(in.readUnsignedShort());
+                }
                 break;
         }
     }
@@ -135,6 +159,10 @@ public final class BungeeExpansion extends PlaceholderExpansion implements Plugi
 
     private void sendPlayersChannelMessage(final String serverName) {
         sendMessage(PLAYERS_CHANNEL, out -> out.writeUTF(serverName));
+    }
+
+    private void sendAddressChannelMessage(final String serverName){
+        sendMessage(ADDRESS_CHANNEL, out -> out.writeUTF(serverName));
     }
 
     private void sendMessage(final String channel, final Consumer<ByteArrayDataOutput> consumer) {
