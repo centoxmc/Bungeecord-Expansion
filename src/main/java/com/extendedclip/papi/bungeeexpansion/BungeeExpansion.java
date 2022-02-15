@@ -132,7 +132,7 @@ public final class BungeeExpansion extends PlaceholderExpansion implements Plugi
         final ByteArrayDataInput in = ByteStreams.newDataInput(message);
         switch (in.readUTF()) {
             case PLAYERS_CHANNEL:
-                BungeeServer pc_server = servers.get(in.readUTF());
+                BungeeServer pc_server = servers.get(in.readUTF().toLowerCase());
                 if(pc_server != null)
                     pc_server.setPlayers(in.readInt());
                 break;
@@ -143,7 +143,7 @@ public final class BungeeExpansion extends PlaceholderExpansion implements Plugi
                 });
                 break;
             case ADDRESS_CHANNEL:
-                BungeeServer ac_server = servers.get(in.readUTF());
+                BungeeServer ac_server = servers.get(in.readUTF().toLowerCase());
                 if(ac_server != null){
                     ac_server.setIp(in.readUTF());
                     ac_server.setPort(in.readUnsignedShort());
